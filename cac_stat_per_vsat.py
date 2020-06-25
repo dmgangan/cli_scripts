@@ -1,10 +1,11 @@
 import os, time, collections, re, telnetlib
 
 #Constants
-DPS = '172.17.14.1'
-HSP = '172.17.12.1'
+DPS = '' #- only if you want to bypass autodiscovery
+HSP = '' #- only if you want to bypass autodiscovery
 FILENAME = 'new_hsp_vsat_cac stat.csv'
 WAIT_TIMEOUT = 0.2
+
 
 #Class for parsed output
 class parsCli():                                                #Obj of this class will take argument of parsing map (fields:parsing regexp), with methods to prase text based on this map providing dict: 'field':'value'
@@ -49,7 +50,7 @@ class telnetCli():                   #Method used to send/receive telnet command
                 self.HOST = host
                 self.conn = telnetlib.Telnet(self.HOST)
 
-        def sendCommand(self, command, timeout=0.01, by_sym=False):     #by_sym argument used when theer ius a need to send command by symbol (one by one), instead of sending entire string
+        def sendCommand(self, command, timeout=0.01, by_sym=False):     #by_sym argument used when theer is a need to send command by symbol (one by one), instead of sending entire string
             command += "\r\n"    
             if by_sym:
                 for ch in command:
@@ -74,6 +75,11 @@ def parse_bb(bb_links):         #Function to parse DPS 'bb links' command and bu
         return (vsat_ids)
 
 
+if not (DPS and HSP):       #Discovering IP of DPS and HSP
+    with open('/etc/sysconfig/network-scripts/ifcfg-br17','r') as file:
+        domain=re.search('.*IPADDR=\d*\.\d*\.(\d*).*',file.read())
+        DPS = '172.17.%s4.1' % domain.group(1)[1]
+        HSP = '172.17.%s2.1' % domain.group(1)[1]        
 
 print('\nPreparing parsing map')
 # Below parsing agenda is build, a dictionary {name_of_fiels : parsing_regexp}
