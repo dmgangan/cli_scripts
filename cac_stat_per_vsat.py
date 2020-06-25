@@ -1,10 +1,4 @@
-import os, time, collections, re, telnetlib
-
-#Constants
-DPS = '' #- only if you want to bypass autodiscovery
-HSP = '' #- only if you want to bypass autodiscovery
-FILENAME = 'new_hsp_vsat_cac stat.csv'
-WAIT_TIMEOUT = 0.2
+import os, sys, time, collections, re, telnetlib
 
 
 #Class for parsed output
@@ -48,6 +42,7 @@ class telnetCli():                   #Method used to send/receive telnet command
 
         def __init__(self, host):
                 self.HOST = host
+                self.WAIT_TIMEOUT = 0.2
                 self.conn = telnetlib.Telnet(self.HOST)
 
         def sendCommand(self, command, timeout=0.01, by_sym=False):     #by_sym argument used when theer is a need to send command by symbol (one by one), instead of sending entire string
@@ -59,7 +54,7 @@ class telnetCli():                   #Method used to send/receive telnet command
             else:
                 self.conn.write(command.encode('ascii'))
             
-            time.sleep(WAIT_TIMEOUT)     #wait for device to generate output
+            time.sleep(self.WAIT_TIMEOUT)     #wait for device to generate output
             return True
 
         def readOutput(self):
@@ -75,48 +70,65 @@ def parse_bb(bb_links):         #Function to parse DPS 'bb links' command and bu
         return (vsat_ids)
 
 
-if not (DPS and HSP):       #Discovering IP of DPS and HSP
-    with open('/etc/sysconfig/network-scripts/ifcfg-br17','r') as file:
-        domain=re.search('.*IPADDR=\d*\.\d*\.(\d*).*',file.read())
-        DPS = '172.17.%s4.1' % domain.group(1)[1]
-        HSP = '172.17.%s2.1' % domain.group(1)[1]        
 
-print('\nPreparing parsing map')
-# Below parsing agenda is build, a dictionary {name_of_fiels : parsing_regexp}
-pmap = {}
-types = ['new','modify','change_to_rob','change_to_eff']
+def main():
 
-pars = {'new':r'\W*Number.*new.*-\W\b@\b\W*(\d*)',
-                'modify':r'\W*Number.*modify.*-\W\b@\b\W*(\d*)',
-                'change_to_rob':r'\W*Number.*change.*robust.*-\W\b@\b\W*(\d*)',
-                'change_to_eff':r'\W*Number.*change.*efficient.*-\W\b@\b\W*(\d*)'}
-fields = ['NO_CAUSE', 'BACKHAULING_LIMIT', 'CBR_LIMIT', 'NO_FREE_BW', 'NO_VOIP_ALLOC_OPTION', 'GLOBAL_BW_LIMIT', 'MPN_MIR', 'OUT_OF_VSAT_CAPACITY', 'NO_FREE_BW_FOR_VOIP']
+    #Constants
+    DPS = '' #- only if you want to bypass autodiscovery
+    HSP = '' #- only if you want to bypass autodiscovery
+    FILENAME = 'vsat_cac_stat.csv'
 
-for tip in types:
-        for filed in fields:
-                pmap[tip+'_'+filed] = re.compile(pars[tip].replace('@',filed))
+    if not (DPS and HSP):       #Discovering IP of DPS and HSP
+        with open('/etc/sysconfig/network-scripts/ifcfg-br17','r') as file:
+            domain=re.search('.*IPADDR=\d*\.\d*\.(\d*).*',file.read())
+            DPS = '172.17.%s4.1' % domain.group(1)[1]
+            HSP = '172.17.%s2.1' % domain.group(1)[1]        
 
-bh_rejects = parsCli(pmap)
+    try:
+        if sys.argv[1]: FILENAME = str(sys.argv[1])+'.csv'
+    except:
+        pass
+
+    print('\nPreparing parsing map')
+    # Below parsing agenda is build, a dictionary {name_of_fiels : parsing_regexp}
+    pmap = {}
+    types = ['new','modify','change_to_rob','change_to_eff']
+
+    pars = {'new':r'\W*Number.*new.*-\W\b@\b\W*(\d*)',
+                    'modify':r'\W*Number.*modify.*-\W\b@\b\W*(\d*)',
+                    'change_to_rob':r'\W*Number.*change.*robust.*-\W\b@\b\W*(\d*)',
+                    'change_to_eff':r'\W*Number.*change.*efficient.*-\W\b@\b\W*(\d*)'}
+    fields = ['NO_CAUSE', 'BACKHAULING_LIMIT', 'CBR_LIMIT', 'NO_FREE_BW', 'NO_VOIP_ALLOC_OPTION', 'GLOBAL_BW_LIMIT', 'MPN_MIR', 'OUT_OF_VSAT_CAPACITY', 'NO_FREE_BW_FOR_VOIP']
+
+    for tip in types:
+            for filed in fields:
+                    pmap[tip+'_'+filed] = re.compile(pars[tip].replace('@',filed))
+
+    bh_rejects = parsCli(pmap)
 
 
-#Getting list of VSATs from DPS
-dps_telnet = telnetCli(DPS)
-print ('Creating list of VSAT IDs')
-dps_telnet.sendCommand('bb links')
-bb_links = dps_telnet.readOutput()
-vsat_ids = parse_bb(bb_links)
-print ('Got '+str(len(vsat_ids))+' VSATs\n')
+    #Getting list of VSATs from DPS
+    dps_telnet = telnetCli(DPS)
+    print ('Creating list of VSAT IDs')
+    dps_telnet.sendCommand('bb links')
+    bb_links = dps_telnet.readOutput()
+    vsat_ids = parse_bb(bb_links)
+    print ('Got '+str(len(vsat_ids))+' VSATs\n')
 
-hsp_telnet = telnetCli(HSP)
-date = time.strftime('%Y-%m-%d %H:%M:%S',time.gmtime())
+    hsp_telnet = telnetCli(HSP)
+    date = time.strftime('%Y-%m-%d %H:%M:%S',time.gmtime())
 
-for vsat_id in vsat_ids:
-        print ('-> Fetching VSAT: ' + vsat_id)
-        hsp_telnet.sendCommand('stat cac link '+ vsat_id, by_sym=True)
-        hsp_out = hsp_telnet.readOutput()
-        parsed_hsp_out = bh_rejects.parseTxt(hsp_out,entry_id=vsat_id)
-        bh_rejects.aggrCsv(parsed_hsp_out, datetime = date)
+    for vsat_id in vsat_ids:
+            print ('-> Fetching VSAT: ' + vsat_id)
+            hsp_telnet.sendCommand('stat cac link '+ vsat_id, by_sym=True)
+            hsp_out = hsp_telnet.readOutput()
+            parsed_hsp_out = bh_rejects.parseTxt(hsp_out,entry_id=vsat_id)
+            bh_rejects.aggrCsv(parsed_hsp_out, datetime = date)
 
-print('\nSaving data to the csv file: '+FILENAME)
-bh_rejects.writeCsv(FILENAME)
-print('Completed. Fetched: '+str(len(vsat_ids))+' VSATs\n')
+    print('\nSaving data to the csv file: '+FILENAME)
+    bh_rejects.writeCsv(FILENAME)
+    print('Completed. Fetched: '+str(len(vsat_ids))+' VSATs\n')
+
+
+if __name__ == "__main__":
+    main()
